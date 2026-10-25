@@ -1,0 +1,12 @@
+{
+  // typecheck and tests run on the sources; the published build uses tsconfig.build.json
+  "compilerOptions": {
+    "module": "Preserve",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "types": ["node"],
+    "noEmit": true,
+    "skipLibCheck": true
+  },
+  "include": ["src", "test"]
+}
