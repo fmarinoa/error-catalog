@@ -1,9 +1,18 @@
 name: CI
 
 on:
-  push:
-    branches: [main]
   pull_request:
+    branches: [main]
+  # publish.yml runs the same checks before publishing
+  workflow_call:
+
+permissions:
+  contents: read
+
+# a new push to the same PR cancels the run it supersedes
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   check:
@@ -17,7 +26,7 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm exec prettier --check .
+      - run: pnpm format:check
       - run: pnpm typecheck
       - run: pnpm test
       # what npm would publish: dist/, README.md, LICENSE, package.json

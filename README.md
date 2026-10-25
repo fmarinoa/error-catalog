@@ -1,5 +1,7 @@
 # @fmarinoa/error-catalog
 
+[![npm](https://img.shields.io/npm/v/@fmarinoa/error-catalog)](https://www.npmjs.com/package/@fmarinoa/error-catalog)
+
 Typed HTTP error catalog: one class per error, a `{ code?, message }` body, a JSON Schema for it, a one-line log format, and an Express error handler.
 
 ## Install
