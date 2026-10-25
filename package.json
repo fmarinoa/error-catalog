@@ -1,6 +1,6 @@
 {
   "name": "@fmarinoa/error-catalog",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Typed HTTP error catalog: error classes, JSON body, JSON Schema, one-line log and an Express error handler",
   "license": "MIT",
   "author": "Franco Marino Aquise",
