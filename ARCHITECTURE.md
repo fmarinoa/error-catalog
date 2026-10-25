@@ -56,6 +56,8 @@ Changing any of these is a change to the public API: see versioning in [AGENTS.m
 
 - **No build to develop.** `exports` points to `src/*.ts`; tests run them with `tsx`, and a workspace that depends on the package runs its sources too.
 - **`dist/` only to publish.** `pnpm build` (`tsc -p tsconfig.build.json`, NodeNext, `.js` + `.d.ts`) emits `dist/` with the same folders as `src/`. `publishConfig.exports` points npm to it, and `files: ["dist"]` keeps the tarball to `dist/`, `README.md`, `LICENSE` and `package.json`.
+- **Published from CI when `version` changes on `main`.** `publish.yml` publishes only a version npm doesn't have yet, after rerunning `ci.yml`, with npm trusted publishing (OIDC), so no npm token lives in the repo. It tags `v<version>` after publishing, so every tag is a version on npm, and creates its GitHub Release from that tag.
+- **Repository rules in `.github/rulesets/`.** `main.json`: `main` changes only through a PR (no direct push, force push or deletion, no bypass). `tags.json`: nobody creates, moves or deletes a tag; the only bypass is a write deploy key whose private half is the `TAG_DEPLOY_KEY` secret, used by `publish.yml`. A personal repo can't list GitHub Actions itself as a bypass, hence the deploy key.
 - **ESM only.** CommonJS consumers load it with `require(esm)` (Node 20.19+, 22.12+).
 
 ## Decisions

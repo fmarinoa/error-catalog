@@ -1,0 +1,58 @@
+name: Publish
+
+on:
+  push:
+    branches: [main]
+    paths: [package.json]
+
+permissions:
+  contents: read
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v7
+      # tag stays empty when this version is already on npm (npm view exits 1 on a 404)
+      - id: version
+        run: |
+          version=$(node -p "require('./package.json').version")
+          npm view "$(node -p "require('./package.json').name")@$version" > /dev/null 2>&1 \
+            || echo "tag=v$version" >> "$GITHUB_OUTPUT"
+
+  check:
+    needs: version
+    if: needs.version.outputs.tag
+    uses: ./.github/workflows/ci.yml
+
+  publish:
+    needs: [version, check]
+    runs-on: ubuntu-latest
+    permissions:
+      # create the GitHub Release
+      contents: write
+      # npm trusted publishing (OIDC): no token secret, and it signs provenance
+      id-token: write
+    env:
+      TAG: ${{ needs.version.outputs.tag }}
+    steps:
+      # the tags ruleset only lets this deploy key create tags
+      - uses: actions/checkout@v7
+        with:
+          ssh-key: ${{ secrets.TAG_DEPLOY_KEY }}
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # CI publishes the pushed commit; pnpm's git checks are for publishing by hand
+      - run: pnpm publish --access public --no-git-checks
+      # tagged after publishing, so every v* tag is a version on npm
+      - run: git tag "$TAG" && git push origin "$TAG"
+      # --verify-tag: the release reuses the tag above, never creates one
+      - run: gh release create "$TAG" --verify-tag --generate-notes
+        env:
+          GH_TOKEN: ${{ github.token }}
