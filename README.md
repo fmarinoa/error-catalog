@@ -6,7 +6,7 @@
 ![dependencies](https://img.shields.io/badge/dependencies-0-brightgreen)
 [![license](https://img.shields.io/npm/l/@fmarinoa/error-catalog)](LICENSE)
 
-Define your HTTP errors once. Get typed classes, the JSON body clients see, a one-line log format that never leaks internals, and the JSON Schema and OpenAPI components that describe them. Express and Fastify adapters answer them; RFC 9457 problem details are one option away.
+Define your HTTP errors once. Get typed classes, the JSON body clients see, a one-line log format that never leaks internals, and the JSON Schema and OpenAPI components that describe them. Express, Fastify and Hono adapters answer them; RFC 9457 problem details are one option away.
 
 ```ts
 import { defineErrors } from "@fmarinoa/error-catalog";
@@ -50,26 +50,26 @@ The same catalog gives you `errors.schema` (JSON Schema of that body) and `error
 npm install @fmarinoa/error-catalog
 ```
 
-ESM only; CommonJS loads it with `require(esm)` (Node 20.19+, 22.12+). Express 5 and Fastify 5 are optional peers, needed only for `@fmarinoa/error-catalog/express` and `@fmarinoa/error-catalog/fastify`.
+ESM only; CommonJS loads it with `require(esm)` (Node 20.19+, 22.12+). Express 5, Fastify 5 and Hono 4 are optional peers, needed only for their adapter: `@fmarinoa/error-catalog/express`, `/fastify` and `/hono`.
 
 ## How it compares
 
-|                                   | this package                               | [http-errors](https://www.npmjs.com/package/http-errors) | [@hapi/boom](https://www.npmjs.com/package/@hapi/boom) | [@fastify/error](https://www.npmjs.com/package/@fastify/error) |
-| --------------------------------- | ------------------------------------------ | -------------------------------------------------------- | ------------------------------------------------------ | -------------------------------------------------------------- |
-| One typed class per app error     | yes, from a catalog                        | one per HTTP status                                      | one factory per HTTP status                            | yes, one `createError` call each                               |
-| Business code on the error        | `code`, in body, log and schema            | no                                                       | no                                                     | `code` (a string)                                              |
-| Fixed client body                 | `{ code?, message }`                       | up to the framework                                      | `{ statusCode, error, message }`                       | Fastify's default                                              |
-| JSON Schema / OpenAPI of the body | yes                                        | no                                                       | no                                                     | no                                                             |
-| One-line log that hides internals | yes (`String(error)`)                      | no                                                       | no                                                     | no                                                             |
-| RFC 9457 problem details          | `toProblem()`                              | no                                                       | no                                                     | no                                                             |
-| Frameworks                        | Express 5, Fastify 5 (core works anywhere) | any; Express's default handler reads its fields          | any; made for hapi                                     | Fastify                                                        |
-| Maturity                          | 0.x, one maintainer                        | years in production                                      | years in production                                    | years in production                                            |
+|                                   | this package                                       | [http-errors](https://www.npmjs.com/package/http-errors) | [@hapi/boom](https://www.npmjs.com/package/@hapi/boom) | [@fastify/error](https://www.npmjs.com/package/@fastify/error) |
+| --------------------------------- | -------------------------------------------------- | -------------------------------------------------------- | ------------------------------------------------------ | -------------------------------------------------------------- |
+| One typed class per app error     | yes, from a catalog                                | one per HTTP status                                      | one factory per HTTP status                            | yes, one `createError` call each                               |
+| Business code on the error        | `code`, in body, log and schema                    | no                                                       | no                                                     | `code` (a string)                                              |
+| Fixed client body                 | `{ code?, message }`                               | up to the framework                                      | `{ statusCode, error, message }`                       | Fastify's default                                              |
+| JSON Schema / OpenAPI of the body | yes                                                | no                                                       | no                                                     | no                                                             |
+| One-line log that hides internals | yes (`String(error)`)                              | no                                                       | no                                                     | no                                                             |
+| RFC 9457 problem details          | `toProblem()`                                      | no                                                       | no                                                     | no                                                             |
+| Frameworks                        | Express 5, Fastify 5, Hono 4 (core works anywhere) | any; Express's default handler reads its fields          | any; made for hapi                                     | Fastify                                                        |
+| Maturity                          | 0.x, one maintainer                                | years in production                                      | years in production                                    | years in production                                            |
 
 Pick something else when:
 
 - You only need standard status errors and nothing more: `http-errors` is enough, and Express already understands it.
 - You build on hapi: use `@hapi/boom`.
-- You need Express 4, Koa, Hono or NestJS: there is no adapter yet. The core still works, since you call `toJSON()` or `toProblem()` yourself, but you would write that glue.
+- You need Express 4, Koa or NestJS: there is no adapter yet. The core still works, since you call `toJSON()` or `toProblem()` yourself, but you would write that glue.
 
 This package pays off when you want one catalog to drive the error classes, the response body, the logs and the API docs together.
 
@@ -283,6 +283,30 @@ app.setErrorHandler(
 - Same behavior as the Express handler. Fastify's own errors (invalid JSON body, schema validation) reach `fallback` with their `statusCode`, so map them there.
 - A route that doesn't exist doesn't reach the error handler: answer it with `app.setNotFoundHandler`.
 - After `reply.hijack()` Fastify never calls the error handler: the route owns its errors.
+
+## Hono
+
+```ts
+import { errorHandler } from "@fmarinoa/error-catalog/hono";
+import { Hono } from "hono";
+
+const app = new Hono();
+
+app.onError(
+  errorHandler({
+    fallback: (err) => new InternalError({ detail: err }),
+    log: (error) => console.error(String(error)),
+    // optional: "problem" answers toProblem() as application/problem+json
+    format: "problem",
+  }),
+);
+```
+
+- Answers `statusCode` with `toJSON()` (or `toProblem()` with `format: "problem"`). Headers that earlier middleware set, like CORS, are kept.
+- Hono's own errors (`HTTPException`, a malformed JSON body) reach `fallback`, so map them there.
+- A route that doesn't exist doesn't reach `onError`: answer it with `app.notFound`.
+- There is no case for a response already started, as in Express and Fastify: an error inside `streamSSE` goes to that helper's own `onError` callback, where you write `event: error` yourself.
+- It works on any runtime Hono runs on, since it only builds a `Response`; the adapter imports `hono` for types only.
 
 ## License
 

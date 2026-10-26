@@ -1,6 +1,6 @@
 # Architecture
 
-`@fmarinoa/error-catalog` turns a catalog of HTTP errors into typed classes. Each error knows its status, an optional business code and a default message; it answers clients with a fixed body (`{ code?, message }`, or RFC 9457 problem details on request), logs itself as one line of JSON, and has JSON Schemas and OpenAPI components for its bodies. Express and Fastify adapters answer them.
+`@fmarinoa/error-catalog` turns a catalog of HTTP errors into typed classes. Each error knows its status, an optional business code and a default message; it answers clients with a fixed body (`{ code?, message }`, or RFC 9457 problem details on request), logs itself as one line of JSON, and has JSON Schemas and OpenAPI components for its bodies. Express, Fastify and Hono adapters answer them.
 
 This file is the source of truth for structure, invariants and decisions. How to work on the package lives in [AGENTS.md](AGENTS.md); how to use it, in [README.md](README.md).
 
@@ -11,8 +11,8 @@ This file is the source of truth for structure, invariants and decisions. How to
    throw new NotFoundError(...)          app.use(errorHandler({ fallback, log }))
                  │                                      │
                  ▼                                      ▼
-   src/index.ts (public: "." )       src/adapters/{express,fastify}.ts
-                 │                    (public: "./express", "./fastify")
+   src/index.ts (public: "." )       src/adapters/{express,fastify,hono}.ts
+                 │          (public: "./express", "./fastify", "./hono")
                  ▼                                      │
    src/core/defineErrors.ts ──► CatalogError.ts ◄───────┤
          │      │      │                                │
@@ -33,6 +33,7 @@ Dependencies point one way: adapters depend on the core, the core never imports 
 - **`src/core/format.ts`**: `ErrorFormat` (`json` | `problem`), its media types and `bodyOf`, the one place that picks a body for a format. Adapters and `openapi` share it.
 - **`src/adapters/express.ts`**: `errorHandler` and `ErrorHandlerOptions`, published as `./express`. Express is an optional peer, imported only as `import type`.
 - **`src/adapters/fastify.ts`**: the same for Fastify, published as `./fastify`; its `errorHandler` goes to `setErrorHandler`.
+- **`src/adapters/hono.ts`**: the same for Hono, published as `./hono`; its `errorHandler` goes to `app.onError`.
 - **`test/`** mirrors `src/`: `test/core/*.test.ts`, `test/adapters/*.test.ts`, and `test/catalog.ts`, the catalog the core tests share.
 
 ## Public API
@@ -42,6 +43,7 @@ Dependencies point one way: adapters depend on the core, the core never imports 
 | `.`         | `defineErrors`, `CatalogError`; types `Catalog`, `ErrorClass`, `ErrorSpec`, `Specs`, `Issue`, `BodySchema`, `ProblemSchema`, `ProblemDetails`, `ErrorFormat`, `OpenApiComponents`, `OpenApiResponse` |
 | `./express` | `errorHandler`; type `ErrorHandlerOptions`                                                                                                                                                           |
 | `./fastify` | `errorHandler`; type `ErrorHandlerOptions`                                                                                                                                                           |
+| `./hono`    | `errorHandler`; type `ErrorHandlerOptions`                                                                                                                                                           |
 
 Changing any of these is a change to the public API: see versioning in [AGENTS.md](AGENTS.md).
 
@@ -56,7 +58,7 @@ Changing any of these is a change to the public API: see versioning in [AGENTS.m
 - **OpenAPI.** `errors.openapi({ format })` returns `{ schemas, responses }` for one format: schema `ErrorBody` or `ProblemDetails`, and one response per error key (description is its default message, one example from a default instance). Responses reference the schema by `$ref`, so the result goes into `components` as is. It does not know routes, so the app maps statuses to responses.
 - **Body schema.** `code` is an `enum` of the codes the catalog declares; required only when every error has one, absent when none has. `additionalProperties: false`.
 - **Issues format.** `fromIssues(message, issues)` gives `<message>: <path>: <issue>; <path>: <issue>`. Paths are joined with `.`; an issue without a path has no prefix. Any object with `{ message, path? }` works (zod, Valibot, ArkType; Joi and class-validator with the README's recipes).
-- **Adapter handlers (Express, Fastify).** A `CatalogError` is answered as is; anything else goes through `fallback` first. `log` always gets the final error. Then: if the client closed the connection (`destroyed`), nothing is written; if headers were sent on `text/event-stream`, it writes `event: error` with the body and ends; if sent on any other content type, it ends without a body; otherwise it answers `statusCode` with the body and its media type. The body is `toJSON()` (`application/json`) or, with `format: "problem"`, `toProblem()` (`application/problem+json`). Fastify never calls the handler for a hijacked reply, and a missing route needs `setNotFoundHandler`.
+- **Adapter handlers (Express, Fastify, Hono).** A `CatalogError` is answered as is; anything else goes through `fallback` first. `log` always gets the final error. Then: if the client closed the connection (`destroyed`), nothing is written; if headers were sent on `text/event-stream`, it writes `event: error` with the body and ends; if sent on any other content type, it ends without a body; otherwise it answers `statusCode` with the body and its media type. The body is `toJSON()` (`application/json`) or, with `format: "problem"`, `toProblem()` (`application/problem+json`). Fastify never calls the handler for a hijacked reply, and a missing route needs `setNotFoundHandler` (Hono: `app.notFound`). The Hono handler has no destroyed or headers-sent cases: it returns a `Response` built with `c.body`, which keeps the headers earlier middleware set, and streaming helpers report their errors to their own `onError`.
 
 ## Build and publishing
 
@@ -78,6 +80,6 @@ Changing any of these is a change to the public API: see versioning in [AGENTS.m
 - **No adapter per validation library.** `Issue` is the Standard Schema shape, so zod, Valibot and ArkType work as they are; Joi and class-validator get a recipe in the README. An adapter is added when a user asks for one.
 - **`; ` between issues.** Validation libraries put commas inside their messages (`expected string, received undefined`), so a comma separator hides where an issue ends.
 - **Own stack only for a 5xx without an `Error` in `detail`.** A 4xx is expected, not a bug, and its stack is noise; an `Error` in `detail` already says where it failed.
-- **`core/` and `adapters/`, no `ports/` or interfaces.** One file per responsibility is enough at this size; a new framework is one file in `adapters/` and a new subpath in `exports`. Fastify was the second adapter because its tests need no extra server package (`app.listen(0)`); Hono would need `@hono/node-server`.
+- **`core/` and `adapters/`, no `ports/` or interfaces.** One file per responsibility is enough at this size; a new framework is one file in `adapters/` and a new subpath in `exports`. Fastify was the second adapter because its tests need no extra server package (`app.listen(0)`); Hono's tests need `@hono/node-server` (a dev dependency) to listen on a real port.
 - **ESM only, built with `tsc`.** No bundler and no dual build to maintain; `require(esm)` covers CommonJS.
 - **Test names without ticket or spec ids.** The package is open source; names describe behavior.

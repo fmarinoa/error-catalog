@@ -18,6 +18,7 @@
     "typescript",
     "express",
     "fastify",
+    "hono",
     "json-schema",
     "openapi",
     "problem-details",
@@ -31,7 +32,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./express": "./src/adapters/express.ts",
-    "./fastify": "./src/adapters/fastify.ts"
+    "./fastify": "./src/adapters/fastify.ts",
+    "./hono": "./src/adapters/hono.ts"
   },
   "publishConfig": {
     "exports": {
@@ -46,6 +48,10 @@
       "./fastify": {
         "types": "./dist/adapters/fastify.d.ts",
         "default": "./dist/adapters/fastify.js"
+      },
+      "./hono": {
+        "types": "./dist/adapters/hono.d.ts",
+        "default": "./dist/adapters/hono.js"
       }
     }
   },
@@ -59,7 +65,8 @@
   },
   "peerDependencies": {
     "express": "^5.0.0",
-    "fastify": "^5.0.0"
+    "fastify": "^5.0.0",
+    "hono": "^4.0.0"
   },
   "peerDependenciesMeta": {
     "express": {
@@ -67,14 +74,19 @@
     },
     "fastify": {
       "optional": true
+    },
+    "hono": {
+      "optional": true
     }
   },
   "devDependencies": {
+    "@hono/node-server": "2.1.5",
     "@trivago/prettier-plugin-sort-imports": "6.0.2",
     "@types/express": "5.0.6",
     "@types/node": "24.19.2",
     "express": "5.3.0",
     "fastify": "5.12.7",
+    "hono": "4.13.14",
     "prettier": "3.9.10",
     "tsx": "4.23.15",
     "typescript": "7.0.2"
