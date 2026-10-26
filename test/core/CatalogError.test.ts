@@ -83,3 +83,63 @@ describe("body and log", () => {
     );
   });
 });
+
+describe("problem details", () => {
+  const { NotFoundError } = defineErrors({
+    NotFoundError: {
+      statusCode: 404,
+      code: "0.4.0",
+      message: "Not Found",
+      type: "https://example.com/problems/not-found",
+    },
+  });
+
+  test("toProblem is title, status, code and type, with the message as detail only when it changes", () => {
+    assert.deepEqual(new NotFoundError().toProblem(), {
+      type: "https://example.com/problems/not-found",
+      title: "Not Found",
+      status: 404,
+      code: "0.4.0",
+    });
+    assert.deepEqual(
+      new NotFoundError({ message: "no such user" }).toProblem(),
+      {
+        type: "https://example.com/problems/not-found",
+        title: "Not Found",
+        status: 404,
+        detail: "no such user",
+        code: "0.4.0",
+      },
+    );
+  });
+
+  test("the internal detail never reaches the problem", () => {
+    const error = new NotFoundError({ detail: { secret: "x" } });
+    assert.equal(JSON.stringify(error.toProblem()).includes("secret"), false);
+    assert.equal("detail" in error.toProblem(), false);
+  });
+
+  test("without a type or a code, the problem leaves them out; the status is the instance's", () => {
+    const { Forbidden } = defineErrors({ Forbidden: { statusCode: 403 } });
+    assert.deepEqual(new Forbidden().toProblem(), {
+      title: "Forbidden",
+      status: 403,
+    });
+    assert.equal(
+      new UpstreamError({ statusCode: 504 }).toProblem().status,
+      504,
+    );
+  });
+
+  test("fromIssues puts the issues in detail and keeps the default title", () => {
+    const error = BadRequestError.fromIssues("Invalid input", [
+      { message: "required", path: ["name"] },
+    ]);
+    assert.deepEqual(error.toProblem(), {
+      title: "Bad Request Error",
+      status: 400,
+      detail: "Invalid input: name: required",
+      code: "0.1.0",
+    });
+  });
+});

@@ -1,6 +1,6 @@
 # Architecture
 
-`@fmarinoa/error-catalog` turns a catalog of HTTP errors into typed classes. Each error knows its status, an optional business code and a default message; it answers clients with a fixed body (`{ code?, message }`), logs itself as one line of JSON, and has a JSON Schema for its body. An Express adapter answers them.
+`@fmarinoa/error-catalog` turns a catalog of HTTP errors into typed classes. Each error knows its status, an optional business code and a default message; it answers clients with a fixed body (`{ code?, message }`, or RFC 9457 problem details on request), logs itself as one line of JSON, and has JSON Schemas and OpenAPI components for its bodies. Express and Fastify adapters answer them.
 
 This file is the source of truth for structure, invariants and decisions. How to work on the package lives in [AGENTS.md](AGENTS.md); how to use it, in [README.md](README.md).
 
@@ -11,13 +11,13 @@ This file is the source of truth for structure, invariants and decisions. How to
    throw new NotFoundError(...)          app.use(errorHandler({ fallback, log }))
                  │                                      │
                  ▼                                      ▼
-   src/index.ts (public: "." )            src/adapters/express.ts (public: "./express")
-                 │                                      │
+   src/index.ts (public: "." )       src/adapters/{express,fastify}.ts
+                 │                    (public: "./express", "./fastify")
                  ▼                                      │
-   src/core/defineErrors.ts ──► CatalogError.ts ◄───────┘
-              │        │
-              ▼        ▼
-       issues.ts   schema.ts
+   src/core/defineErrors.ts ──► CatalogError.ts ◄───────┤
+         │      │      │                                │
+         ▼      ▼      ▼                                │
+   issues.ts schema.ts openapi.ts ──► format.ts ◄───────┘
 ```
 
 Dependencies point one way: adapters depend on the core, the core never imports an adapter, and the core has no runtime dependencies (only `node:util`).
@@ -25,32 +25,38 @@ Dependencies point one way: adapters depend on the core, the core never imports 
 ## Code map
 
 - **`src/index.ts`**: the public API of `.`; only re-exports. Anything not re-exported here (or from an adapter) is internal.
-- **`src/core/CatalogError.ts`**: the base class. `toJSON()` is the client body; `toString()` is the log line.
-- **`src/core/defineErrors.ts`**: `defineErrors`, the spec types (`ErrorSpec`, `Specs`) and the generated class types (`ErrorClass`, `Catalog`). One class per key, plus `schema`.
+- **`src/core/CatalogError.ts`**: the base class. `toJSON()` is the client body; `toProblem()` is the RFC 9457 body; `toString()` is the log line.
+- **`src/core/defineErrors.ts`**: `defineErrors`, the spec types (`ErrorSpec`, `Specs`) and the generated class types (`ErrorClass`, `Catalog`). One class per key, plus `schema`, `problemSchema` and `openapi`.
 - **`src/core/issues.ts`**: `Issue` (the Standard Schema issue shape) and the `fromIssues` message format.
-- **`src/core/schema.ts`**: `BodySchema` and the JSON Schema of the body, built from the list of codes.
+- **`src/core/schema.ts`**: `BodySchema` and `ProblemSchema`, the JSON Schemas of both bodies, built from the codes and statuses.
+- **`src/core/openapi.ts`**: `OpenApiComponents`, the schema plus one response per error, for one format.
+- **`src/core/format.ts`**: `ErrorFormat` (`json` | `problem`), its media types and `bodyOf`, the one place that picks a body for a format. Adapters and `openapi` share it.
 - **`src/adapters/express.ts`**: `errorHandler` and `ErrorHandlerOptions`, published as `./express`. Express is an optional peer, imported only as `import type`.
+- **`src/adapters/fastify.ts`**: the same for Fastify, published as `./fastify`; its `errorHandler` goes to `setErrorHandler`.
 - **`test/`** mirrors `src/`: `test/core/*.test.ts`, `test/adapters/*.test.ts`, and `test/catalog.ts`, the catalog the core tests share.
 
 ## Public API
 
-| Entry       | Exports                                                                                                    |
-| ----------- | ---------------------------------------------------------------------------------------------------------- |
-| `.`         | `defineErrors`, `CatalogError`; types `Catalog`, `ErrorClass`, `ErrorSpec`, `Specs`, `Issue`, `BodySchema` |
-| `./express` | `errorHandler`; type `ErrorHandlerOptions`                                                                 |
+| Entry       | Exports                                                                                                                                                                                              |
+| ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `.`         | `defineErrors`, `CatalogError`; types `Catalog`, `ErrorClass`, `ErrorSpec`, `Specs`, `Issue`, `BodySchema`, `ProblemSchema`, `ProblemDetails`, `ErrorFormat`, `OpenApiComponents`, `OpenApiResponse` |
+| `./express` | `errorHandler`; type `ErrorHandlerOptions`                                                                                                                                                           |
+| `./fastify` | `errorHandler`; type `ErrorHandlerOptions`                                                                                                                                                           |
 
 Changing any of these is a change to the public API: see versioning in [AGENTS.md](AGENTS.md).
 
 ## Invariants
 
 - **Body.** `toJSON()` returns `{ code, message }`, or `{ message }` when the error has no code: never `detail`, `statusCode` or `stack`. It is the only thing a client ever sees.
+- **Problem body.** `toProblem()` returns `{ type?, title, status, detail?, code? }`: `title` is the spec's default message, `status` the instance's `statusCode`, `type` and `code` only when the spec has them, and `detail` is the instance's `message` only when it differs from `title`. It is the public message: the internal `detail` never reaches it. `toJSON()` does not change.
 - **Log line.** `toString()` is one line of JSON with `code`, `message`, `statusCode` and `detail`. Errors anywhere in `detail` become `{ name, message, stack }` (their props are non-enumerable). A circular or BigInt `detail` falls back to `util.inspect`, never throws. A 5xx also carries its own `stack`, unless `detail` is an `Error`; a 4xx never does.
 - **Spec defaults.** Only `statusCode` is required. Without `message`, the key is the message; without `code`, there is no code anywhere (body, log, schema). A list of statuses (`[503, 504]`) makes the constructor require one of them; `fromIssues` on such a class uses the first.
 - **Names.** Each class and its instances are named after their key, so stack traces read `NotFoundError: ...`. `instanceof` works with the class and with `CatalogError`.
-- **`schema` is reserved.** A key named `schema` fails to typecheck and throws a `TypeError` at runtime: `errors.schema` is the body's JSON Schema.
+- **Catalog members are reserved.** A key named `schema`, `problemSchema` or `openapi` fails to typecheck and throws a `TypeError` at runtime: they are the catalog's own members (the JSON Schemas and `openapi()`).
+- **OpenAPI.** `errors.openapi({ format })` returns `{ schemas, responses }` for one format: schema `ErrorBody` or `ProblemDetails`, and one response per error key (description is its default message, one example from a default instance). Responses reference the schema by `$ref`, so the result goes into `components` as is. It does not know routes, so the app maps statuses to responses.
 - **Body schema.** `code` is an `enum` of the codes the catalog declares; required only when every error has one, absent when none has. `additionalProperties: false`.
 - **Issues format.** `fromIssues(message, issues)` gives `<message>: <path>: <issue>; <path>: <issue>`. Paths are joined with `.`; an issue without a path has no prefix. Any object with `{ message, path? }` works (zod, Valibot, ArkType; Joi and class-validator with the README's recipes).
-- **Express handler.** A `CatalogError` is answered as is; anything else goes through `fallback` first. `log` always gets the final error. Then: if the client closed the connection (`res.destroyed`), nothing is written; if headers were sent on `text/event-stream`, it writes `event: error` with `toJSON()` and ends; if sent on any other content type, it ends without a body; otherwise `status(statusCode).json(toJSON())`.
+- **Adapter handlers (Express, Fastify).** A `CatalogError` is answered as is; anything else goes through `fallback` first. `log` always gets the final error. Then: if the client closed the connection (`destroyed`), nothing is written; if headers were sent on `text/event-stream`, it writes `event: error` with the body and ends; if sent on any other content type, it ends without a body; otherwise it answers `statusCode` with the body and its media type. The body is `toJSON()` (`application/json`) or, with `format: "problem"`, `toProblem()` (`application/problem+json`). Fastify never calls the handler for a hijacked reply, and a missing route needs `setNotFoundHandler`.
 
 ## Build and publishing
 
@@ -63,13 +69,15 @@ Changing any of these is a change to the public API: see versioning in [AGENTS.m
 ## Decisions
 
 - **Own library, not `http-errors`, `@hapi/boom` or `@fastify/error`.** None ties a typed code to a fixed body, its JSON Schema and a safe one-line log; with any of them the app still owns `toJSON`, `toString` and the validation message.
-- **A fixed body, `{ code?, message }`.** No body option: a configurable body would need a configurable schema and adapter. Revisit with a real user who needs another shape (RFC 9457 is the likely one).
+- **A fixed body, `{ code?, message }`, and one alternative: RFC 9457.** No free-form body option: a configurable body would need a configurable schema and adapter. RFC 9457 was the shape to revisit, and it is added without touching the default: `toProblem()`, `errors.problemSchema` and `format: "problem"` in the adapters. The default stays `json` because changing it would break every client of the existing body.
+- **`title` is the catalog message, `detail` the public message.** RFC 9457 `detail` is visible to clients, so it must never be the internal `detail`; it comes from `message`, which `toJSON()` already sends. No `publicDetail` field: that would be a second public message to keep in sync. `type` is an optional spec field, with no default URI, because inventing one would make up a namespace for the app.
+- **`openapi()` per catalog, not a function over specs.** The catalog already holds the classes and codes, so it builds its own components; a separate function would make the app pass the specs twice.
 - **`code` and `message` optional.** Not every organization has business codes; the key is a readable default message.
 - **`statusCode`, not `status`.** It matches Node's `res.statusCode` and keeps one name in the spec, the instance and the log line.
 - **A plain JSON Schema, no zod.** Zero runtime dependencies; any OpenAPI generator takes a JSON Schema.
 - **No adapter per validation library.** `Issue` is the Standard Schema shape, so zod, Valibot and ArkType work as they are; Joi and class-validator get a recipe in the README. An adapter is added when a user asks for one.
 - **`; ` between issues.** Validation libraries put commas inside their messages (`expected string, received undefined`), so a comma separator hides where an issue ends.
 - **Own stack only for a 5xx without an `Error` in `detail`.** A 4xx is expected, not a bug, and its stack is noise; an `Error` in `detail` already says where it failed.
-- **`core/` and `adapters/`, no `ports/` or interfaces.** One file per responsibility is enough at this size; a new framework is one file in `adapters/` and a new subpath in `exports`.
+- **`core/` and `adapters/`, no `ports/` or interfaces.** One file per responsibility is enough at this size; a new framework is one file in `adapters/` and a new subpath in `exports`. Fastify was the second adapter because its tests need no extra server package (`app.listen(0)`); Hono would need `@hono/node-server`.
 - **ESM only, built with `tsc`.** No bundler and no dual build to maintain; `require(esm)` covers CommonJS.
 - **Test names without ticket or spec ids.** The package is open source; names describe behavior.

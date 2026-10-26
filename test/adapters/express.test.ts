@@ -6,7 +6,11 @@ import { describe, mock, test } from "node:test";
 import express, { RequestHandler } from "express";
 
 import { errorHandler } from "../../src/adapters/express.js";
-import { CatalogError, defineErrors } from "../../src/index.js";
+import {
+  CatalogError,
+  type ErrorFormat,
+  defineErrors,
+} from "../../src/index.js";
 
 const { BadRequestError, InternalError } = defineErrors({
   BadRequestError: {
@@ -22,13 +26,18 @@ const { BadRequestError, InternalError } = defineErrors({
 });
 
 // one GET / route, the error handler after it, on a real port
-async function serve(handler: RequestHandler, logged: CatalogError[] = []) {
+async function serve(
+  handler: RequestHandler,
+  logged: CatalogError[] = [],
+  format?: ErrorFormat,
+) {
   const app = express();
   app.get("/", handler);
   app.use(
     errorHandler({
       fallback: (err) => new InternalError({ detail: err }),
       log: (error) => logged.push(error),
+      format,
     }),
   );
   const server = app.listen(0);
@@ -104,6 +113,62 @@ describe("error responses", () => {
     server.close();
 
     assert.equal(text, "partial");
+  });
+});
+
+describe("problem format", () => {
+  test("answers toProblem as application/problem+json", async () => {
+    const server = await serve(
+      async () => {
+        throw new BadRequestError({ message: "invalid", detail: "why" });
+      },
+      [],
+      "problem",
+    );
+    const res = await fetch(server.url);
+    server.close();
+
+    assert.equal(res.status, 400);
+    assert.match(
+      res.headers.get("content-type")!,
+      /^application\/problem\+json/,
+    );
+    assert.deepEqual(await res.json(), {
+      title: "Bad Request Error",
+      status: 400,
+      detail: "invalid",
+      code: "0.1.0",
+    });
+  });
+
+  test("the default format stays application/json", async () => {
+    const server = await serve(async () => {
+      throw new BadRequestError();
+    });
+    const res = await fetch(server.url);
+    server.close();
+
+    assert.match(res.headers.get("content-type")!, /^application\/json/);
+  });
+
+  test("an event: error line carries the problem", async () => {
+    const server = await serve(
+      async (_req, res) => {
+        res.setHeader("content-type", "text/event-stream");
+        res.write("data: 1\n\n");
+        throw new BadRequestError({ message: "x" });
+      },
+      [],
+      "problem",
+    );
+    const res = await fetch(server.url);
+    const text = await res.text();
+    server.close();
+
+    assert.equal(
+      text,
+      'data: 1\n\nevent: error\ndata: {"title":"Bad Request Error","status":400,"detail":"x","code":"0.1.0"}\n\n',
+    );
   });
 });
 

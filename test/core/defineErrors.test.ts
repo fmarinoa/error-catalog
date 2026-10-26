@@ -44,14 +44,31 @@ describe("error classes", () => {
     assert.equal(new BadRequestError({ message: "x" }).message, "x");
   });
 
-  test("a key named schema is rejected, errors.schema is taken", () => {
+  test("the keys schema, problemSchema and openapi are rejected, the catalog has them", () => {
+    const spec = { statusCode: 400, code: "0.9.0", message: "x" };
     assert.throws(
       () =>
         defineErrors({
-          // @ts-expect-error schema is reserved at the type level too
-          schema: { statusCode: 400, code: "0.9.0", message: "x" },
+          // @ts-expect-error the catalog's own members are reserved at the type level too
+          schema: spec,
         }),
-      TypeError,
+      /"schema"/,
+    );
+    assert.throws(
+      () =>
+        defineErrors({
+          // @ts-expect-error see above
+          problemSchema: spec,
+        }),
+      /"problemSchema"/,
+    );
+    assert.throws(
+      () =>
+        defineErrors({
+          // @ts-expect-error see above
+          openapi: spec,
+        }),
+      /"openapi"/,
     );
   });
 });

@@ -17,7 +17,11 @@
     "http",
     "typescript",
     "express",
+    "fastify",
     "json-schema",
+    "openapi",
+    "problem-details",
+    "rfc-9457",
     "standard-schema"
   ],
   "type": "module",
@@ -26,7 +30,8 @@
   ],
   "exports": {
     ".": "./src/index.ts",
-    "./express": "./src/adapters/express.ts"
+    "./express": "./src/adapters/express.ts",
+    "./fastify": "./src/adapters/fastify.ts"
   },
   "publishConfig": {
     "exports": {
@@ -37,6 +42,10 @@
       "./express": {
         "types": "./dist/adapters/express.d.ts",
         "default": "./dist/adapters/express.js"
+      },
+      "./fastify": {
+        "types": "./dist/adapters/fastify.d.ts",
+        "default": "./dist/adapters/fastify.js"
       }
     }
   },
@@ -49,10 +58,14 @@
     "format:check": "prettier --check ."
   },
   "peerDependencies": {
-    "express": "^5.0.0"
+    "express": "^5.0.0",
+    "fastify": "^5.0.0"
   },
   "peerDependenciesMeta": {
     "express": {
+      "optional": true
+    },
+    "fastify": {
       "optional": true
     }
   },
@@ -61,6 +74,7 @@
     "@types/express": "5.0.6",
     "@types/node": "24.19.2",
     "express": "5.3.0",
+    "fastify": "5.12.7",
     "prettier": "3.9.10",
     "tsx": "4.23.15",
     "typescript": "7.0.2"

@@ -1,12 +1,15 @@
 import type { ErrorRequestHandler } from "express";
 
 import { CatalogError } from "../core/CatalogError.js";
+import { type ErrorFormat, bodyOf, mediaType } from "../core/format.js";
 
 export interface ErrorHandlerOptions {
   /** Turns any error that isn't a `CatalogError` (a bug, a library's error) into one. */
   fallback: (err: unknown) => CatalogError;
   /** Gets the final error, answered or not. `String(error)` is its one-line JSON log. */
   log: (error: CatalogError) => void;
+  /** `"json"` (default): `{ code?, message }`. `"problem"`: RFC 9457, as `application/problem+json`. */
+  format?: ErrorFormat;
 }
 
 /**
@@ -16,15 +19,16 @@ export interface ErrorHandlerOptions {
  * For each error it:
  * 1. Uses it as is when it is a `CatalogError`, or turns it into one with `fallback`.
  * 2. Calls `log` with it.
- * 3. Answers `statusCode` with `toJSON()` as the body (`{ code?, message }`), never `detail` or `stack`.
+ * 3. Answers `statusCode` with `toJSON()` as the body (`{ code?, message }`), or with `toProblem()` and
+ *    `application/problem+json` when `format` is `"problem"`. Never `detail` or `stack`.
  *
  * When the answer can't be a normal response:
  * - The client already closed the connection: it only logs, nothing is written.
  * - Headers already sent on `text/event-stream` (SSE): the status can't change, so it writes
- *   `event: error` with `toJSON()` as data and ends the stream.
+ *   `event: error` with the body as data and ends the stream.
  * - Headers already sent on any other content type: it ends the response without a body.
  *
- * @param options `fallback` and `log`.
+ * @param options `fallback`, `log` and optionally `format`.
  * @returns The error-handling middleware; mount it after every route.
  *
  * @example Basic
@@ -49,6 +53,18 @@ export interface ErrorHandlerOptions {
  *   }),
  * );
  * // GET /users/1 -> 404 { "message": "User not found" }
+ * ```
+ *
+ * @example RFC 9457 problem details
+ * ```ts
+ * app.use(
+ *   errorHandler({
+ *     fallback: (err) => new InternalError({ detail: err }),
+ *     log: (error) => console.error(String(error)),
+ *     format: "problem",
+ *   }),
+ * );
+ * // GET /users/1 -> 404 application/problem+json { "title": "NotFoundError", "status": 404, "detail": "User not found" }
  * ```
  *
  * @example Mapping a library's errors in fallback (invalid JSON from express.json())
@@ -76,6 +92,7 @@ export interface ErrorHandlerOptions {
 export function errorHandler({
   fallback,
   log,
+  format = "json",
 }: ErrorHandlerOptions): ErrorRequestHandler {
   return (err, _req, res, _next) => {
     const error = err instanceof CatalogError ? err : fallback(err);
@@ -89,13 +106,19 @@ export function errorHandler({
       if (
         String(res.getHeader("content-type")).startsWith("text/event-stream")
       ) {
-        res.end(`event: error\ndata: ${JSON.stringify(error.toJSON())}\n\n`);
+        res.end(
+          `event: error\ndata: ${JSON.stringify(bodyOf(error, format))}\n\n`,
+        );
       } else {
         res.end();
       }
       return;
     }
 
-    res.status(error.statusCode).json(error.toJSON());
+    // res.json keeps a content type that is already set
+    res
+      .status(error.statusCode)
+      .type(mediaType[format])
+      .json(bodyOf(error, format));
   };
 }

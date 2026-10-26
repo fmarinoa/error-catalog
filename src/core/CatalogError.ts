@@ -1,9 +1,20 @@
 import { inspect } from "node:util";
 
+// RFC 9457 problem details, with the business code as an extension member
+export interface ProblemDetails {
+  type?: string;
+  title: string;
+  status: number;
+  detail?: string;
+  code?: string;
+}
+
 export class CatalogError<N extends number = number> extends Error {
   readonly code: string | undefined;
   readonly statusCode: N;
   readonly detail: unknown;
+  readonly type: string | undefined;
+  readonly title: string;
 
   constructor({
     name,
@@ -11,18 +22,25 @@ export class CatalogError<N extends number = number> extends Error {
     statusCode,
     message,
     detail,
+    type,
+    title = message,
   }: {
     name: string;
     code?: string;
     statusCode: N;
     message: string;
     detail?: unknown;
+    type?: string;
+    // the spec's default message: it names the kind of error, `message` this occurrence
+    title?: string;
   }) {
     super(message);
     this.name = name;
     this.code = code;
     this.statusCode = statusCode;
     this.detail = detail;
+    this.type = type;
+    this.title = title;
   }
 
   // the body a client sees: nothing about detail, statusCode or stack; no code key without a code
@@ -30,6 +48,18 @@ export class CatalogError<N extends number = number> extends Error {
     return this.code === undefined
       ? { message: this.message }
       : { code: this.code, message: this.message };
+  }
+
+  // RFC 9457 body; its `detail` is the public message of this occurrence, never this.detail
+  toProblem(): ProblemDetails {
+    const { type, title, statusCode, message, code } = this;
+    return {
+      ...(type !== undefined && { type }),
+      title,
+      status: statusCode,
+      ...(message !== title && { detail: message }),
+      ...(code !== undefined && { code }),
+    };
   }
 
   // single-line JSON, one log event per error
